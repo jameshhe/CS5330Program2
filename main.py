@@ -37,6 +37,38 @@ class LockManager:
         pass
 
 
+class Transaction:
+    def __init__(self, k: int):
+        self.local = [i for i in range(k)]
+
+    # read the source-th number from the db and set it local[dest]
+    def read(self, db: Database, source: int, dest: int) -> None:
+        self.local[dest] = db.read(source)
+
+    # write local[source] to the dest-th number in the db
+    def write(self, db: Database, source: int, dest: int) -> None:
+        db.write(dest, self.local[source])
+
+    def add(self, source: int, v: int) -> None:
+        self.local[source] += v
+
+    def sub(self, source: int, v: int) -> None:
+        self.local[source] -= v
+
+    def mult(self, source: int, v: int) -> None:
+        self.local[source] *= v
+
+    def copy(self, s1: int, s2: int) -> None:
+        self.local[s1] = self.local[s2]
+
+    def combine(self, s1: int, s2: int) -> None:
+        self.local[s1] += self.local[s2]
+
+    def display(self) -> None:
+        for num in self.local:
+            print(num, end=' ')
+
+
 if __name__ == '__main__':
-    db = Database(10, True)
-    db.print()
+    t = Transaction(10)
+    t.display()
