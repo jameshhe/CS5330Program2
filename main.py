@@ -1,5 +1,6 @@
 from typing import List, Tuple
 import sys
+import random
 
 
 class Database:
@@ -25,6 +26,8 @@ class LockManager:
     # return 1 if lock is granted, 0 if not
     def request(self, tid: int, k: int, is_s_lock: bool) -> int:
         granted = False
+        statement = str(tid) + " requests " + "S" if is_s_lock else "X" + " lock on " + str(k) + ": " + "G" if granted else "D"
+        print(statement)
         return 1 if granted else 0
 
     # release all locks held by transaction tid
@@ -78,24 +81,49 @@ class Transaction:
     def add_command(self, operator, operand1, operand2):
         self.commands.append([operator, operand1, operand2])
 
+    # a transaction is finished if the length of its commands is 0
+    def finished(self) -> bool:
+        return len(self.commands) == 0
 
-def read_transaction_file(file_name: str, item_count: int) -> Transaction:
-    transaction = Transaction(item_count)
+
+# set up the program, including creating a database, reading transaction files, and creating transactions
+def setup(item_count: int, transaction_files: List[str]):
+    # create database
+    DB = Database(item_count, True)
+    transactions = []
+    # read transactions and add them to an array of transactions
+    for file_name in transaction_files:
+        transaction = read_transaction_file(file_name)
+        transactions.append(transaction)
+    return DB, transactions
+
+
+def read_transaction_file(file_name: str) -> Transaction:
     with open(file_name) as file:
         for i, line in enumerate(file):
-            if i != 0:
+            if i == 0:
+                local_variable_count = line.strip().split(" ")[1]
+                local_variable_count = int(local_variable_count)
+                transaction = Transaction(local_variable_count)
+            else:
                 operator, operand1, operand2 = line.strip().split(" ")
                 transaction.add_command(operator, int(operand1), int(operand2))
     return transaction
 
 
-if __name__ == '__main__':
-    item_count, transaction_files = int(sys.argv[1]), sys.argv[2:]
-    # create database
-    DB = Database(item_count, True)
-    transactions = []
-    for file_name in transaction_files:
-        transaction = read_transaction_file(file_name, item_count)
-        transactions.append(transaction)
+# determines if the program can still process more transactions and can therefore proceed
+def processing(transactions: List[Transaction]) -> bool:
     for transaction in transactions:
-        transaction.display()
+        if not transaction.finished():
+            return True
+    return False
+
+
+if __name__ == '__main__':
+    DB, transactions = setup(int(sys.argv[1]), sys.argv[2:])
+    while processing(transactions):
+        # randomly pick a transaction
+        curr_transaction_index = random.randrange(0, len(transactions))
+        # process the next instruction
+        curr_transaction = transactions[curr_transaction_index]
+        break
