@@ -1,4 +1,4 @@
-from typing import List, Tuple
+from typing import List, Tuple, Dict
 import sys
 import random
 
@@ -15,31 +15,80 @@ class Database:
         self.database[k] = w
 
     def print(self) -> None:
-        print(self.database)
+        print("Database:", self.database)
 
 
 class LockManager:
-    def __init__(self):
-        self.locks = {}
+    def __init__(self, DB: Database):
+        # We need to create a lock table based on the data items in the DB
+        # {data item: list of transaction ids holding the lock on this data item}
+        self.lock_table: Dict[int, List[int]] = {i: [] for i in range(len(DB.database))}
+        # Also create a table to see which transaction has which locks to make it more efficient
+        # it's a dictionary where each tid has a list of tuples: int contains the index to be locked,
+        # bool is whether it's an S-Lock: True for S-lock, False for X-lock
+        self.transaction_locks: Dict[int, List[Tuple[int, bool]]] = {}
 
     # transaction id, kth integer of the database, if the request is for a S-lock
     # return 1 if lock is granted, 0 if not
     def request(self, tid: int, k: int, is_s_lock: bool) -> int:
         granted = False
-        statement = str(tid) + " requests " + "S" if is_s_lock else "X" + " lock on " + str(
-            k) + ": " + "G" if granted else "D"
+        if is_s_lock:
+            # if no other transaction has an X-lock
+            if not self.has_x_lock_on(k):
+                granted = True
+                self.lock_table[k].append(tid)
+                self.transaction_locks.setdefault(tid, []).append((k, True))
+        else:
+            # if it's an x-lock, we need to first check if any other transactions has any lock on k
+            if not self.has_lock_on(k):
+                granted = True
+                # see if the current tid holds a lock on k already
+                if tid in self.lock_table[k]:
+                    for i, (curr_k, curr_is_s_lock) in enumerate(self.transaction_locks[tid]):
+                        if curr_k == k:
+                            # update to an X-lock
+                            self.transaction_locks[tid][i] = (k, False)
+                # if the current tid does not hold a lock on k
+                else:
+                    self.lock_table[k].append(tid)
+                    self.transaction_locks.setdefault(tid, []).append((k, False))
+        statement = "T" + str(tid) + " requests " + ("S" if is_s_lock else "X") + " lock on item " + str(
+            k) + ": " + ("G" if granted else "D")
         print(statement)
         return 1 if granted else 0
 
     # release all locks held by transaction tid
     # return the number of locks released
     def releaseAll(self, tid: int) -> int:
-        locks_released = 0
+
+        if tid not in self.transaction_locks:
+            return 0
+        print("Releasing all locks held by T", tid, sep='')
+        locks_released = len(self.transaction_locks[tid])
+        del self.transaction_locks[tid]
+        for item, locks in self.lock_table.items():
+            if tid in locks:
+                locks.remove(tid)
+                self.lock_table[item] = locks
         return locks_released
 
     # return all locks held by tid
     def showLocks(self, tid: int) -> List[Tuple[int, bool]]:
-        pass
+        return self.transaction_locks[tid]
+
+    # shows if a data item has any lock on it
+    def has_lock_on(self, item: int) -> bool:
+        return len(self.lock_table[item]) > 0
+
+    # shows if a data item has any x-lock on it
+    def has_x_lock_on(self, item: int) -> bool:
+        transactions = self.lock_table[item]
+        for transaction in transactions:
+            locks = self.transaction_locks[transaction]
+            for data, is_s_lock in locks:
+                if not is_s_lock:
+                    return True
+        return False
 
 
 class Transaction:
@@ -93,46 +142,18 @@ class Transaction:
     def finished(self) -> bool:
         return len(self.commands) == 0
 
-    # performs the next command and removes it from the list
-    def do_next_command(self, db: Database):
-        operator, operand1, operand2 = self.commands.pop(0)
-
-        # read
-        if operator == 'R':
-            self.read(db, operand1, operand2)
-        # write
-        elif operator == 'W':
-            self.write(db, operand1, operand2)
-        # add
-        elif operator == 'A':
-            self.add(operand1, operand2)
-        # subtract
-        elif operator == 'S':
-            self.sub(operand1, operand2)
-        # multiply
-        elif operator == 'M':
-            self.mult(operand1, operand2)
-        # copy
-        elif operator == 'C':
-            self.copy(operand1, operand2)
-        # combine
-        elif operator == 'O':
-            self.combine(operand1, operand2)
-        # print the current elements in the database
-        elif operator == 'P':
-            db.print()
-
 
 # set up the program, including creating a database, reading transaction files, and creating transactions
 def setup(item_count: int, transaction_files: List[str]):
     # create database
     DB = Database(item_count, True)
+    Manager = LockManager(DB)
     transactions = []
     # read transactions and add them to an array of transactions
     for file_name in transaction_files:
         transaction = read_transaction_file(file_name)
         transactions.append(transaction)
-    return DB, transactions
+    return DB, transactions, Manager
 
 
 def read_transaction_file(file_name: str) -> Transaction:
@@ -161,15 +182,62 @@ def print_transactions(transactions: List[Transaction]) -> None:
         transaction.display()
 
 
+# performs the next command and removes it from the list
+def do_next_command(db: Database, manager: LockManager, transaction: Transaction, tid: int):
+    granted = True
+    operator, operand1, operand2 = transaction.commands[0]
+
+    # read
+    if operator == 'R':
+        granted = manager.request(tid, operand1, True)
+        if granted:
+            print("T" + str(curr_transaction_index) + " execute ", end='')
+            transaction.read(db, operand1, operand2)
+    # write
+    elif operator == 'W':
+        granted = manager.request(tid, operand1, False)
+        if granted:
+            print("T" + str(curr_transaction_index) + " execute ", end='')
+            transaction.write(db, operand1, operand2)
+    # add
+    elif operator == 'A':
+        print("T" + str(curr_transaction_index) + " execute ", end='')
+        transaction.add(operand1, operand2)
+    # subtract
+    elif operator == 'S':
+        print("T" + str(curr_transaction_index) + " execute ", end='')
+        transaction.sub(operand1, operand2)
+    # multiply
+    elif operator == 'M':
+        print("T" + str(curr_transaction_index) + " execute ", end='')
+        transaction.mult(operand1, operand2)
+    # copy
+    elif operator == 'C':
+        print("T" + str(curr_transaction_index) + " execute ", end='')
+        transaction.copy(operand1, operand2)
+    # combine
+    elif operator == 'O':
+        print("T" + str(curr_transaction_index) + " execute ", end='')
+        transaction.combine(operand1, operand2)
+    # print the current elements in the database
+    elif operator == 'P':
+        db.print()
+
+    if granted:
+        print("Popping")
+        transaction.commands.pop(0)
+
+
 if __name__ == '__main__':
-    DB, transactions = setup(int(sys.argv[1]), sys.argv[2:])
+    DB, transactions, Manager = setup(int(sys.argv[1]), sys.argv[2:])
     while processing(transactions):
         # randomly pick a transaction
         curr_transaction_index = random.randrange(0, len(transactions))
         # process the next instruction
         curr_transaction = transactions[curr_transaction_index]
         if not curr_transaction.finished():
-            print("T" + str(curr_transaction_index) + " execute ", end='')
-            curr_transaction.do_next_command(DB)
+            do_next_command(DB, Manager, curr_transaction, curr_transaction_index)
+        # otherwise, if the current transaction is finished, release all locks
+        else:
+            Manager.releaseAll(curr_transaction_index)
     DB.print()
-    print_transactions(transactions)
