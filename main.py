@@ -55,7 +55,7 @@ class LockManager:
                 else:
                     self.lock_table[k].append(tid)
                     self.transaction_locks.setdefault(tid, []).append((k, False))
-        statement = "T" + str(tid) + " requests " + ("S" if is_s_lock else "X") + " lock on item " + str(
+        statement = "T" + str(tid) + " request " + ("S" if is_s_lock else "X") + "-lock on item " + str(
             k) + ": " + ("G" if granted else "D")
         print(statement)
         return 1 if granted else 0
@@ -66,7 +66,6 @@ class LockManager:
 
         if tid not in self.transaction_locks:
             return 0
-        print("Releasing all locks held by T", tid, sep='')
         locks_released = len(self.transaction_locks[tid])
         del self.transaction_locks[tid]
         for item, locks in self.lock_table.items():
@@ -78,7 +77,6 @@ class LockManager:
     # return all locks held by tid
     def showLocks(self, tid: int) -> List[Tuple[int, bool]]:
         locks_held = self.transaction_locks[tid] if tid in self.transaction_locks else []
-        print("Locks held by T", tid, " ", locks_held, sep='')
         return locks_held
 
     # shows if a data item has any lock on it
@@ -109,41 +107,42 @@ class Transaction:
 
     # read the source-th number from the db and set it local[dest]
     def read(self, db: Database, source: int, dest: int) -> None:
-        print("Reading", db.read(source), "to index", dest)
+        # read db[x] and store it to local[y]
+        print("read db[", source, "] and store it to local[", dest, "]", sep='')
         self.local[dest] = db.read(source)
 
     # write local[source] to the dest-th number in the db
     def write(self, db: Database, source: int, dest: int) -> None:
-        print("Writing", self.local[source], "at index", source, "to database at index", dest)
+        # write local[x] to db[y]
+        print("write local[", source, "] to db[", dest, "]", sep='')
         db.write(dest, self.local[source])
 
     def add(self, source: int, v: int) -> None:
-        print("Adding", self.local[source], "and", v, "at index", source)
+        # local[x] = local[x] + d
+        print("local[", source, "] = local[", source, "] + ", v, sep='')
         self.local[source] += v
 
     def sub(self, source: int, v: int) -> None:
-        print("Subtracting", self.local[source], "and", v, "at index", source)
+        print("local[", source, "] = local[", source, "] - ", v, sep='')
         self.local[source] -= v
 
     def mult(self, source: int, v: int) -> None:
-        print("Multiplying", self.local[source], "and", v, "at index", source)
+        print("local[", source, "] = local[", source, "] * ", v, sep='')
         self.local[source] *= v
 
     def copy(self, s1: int, s2: int) -> None:
-        print("Copying", self.local[s2], "to index", s1)
+        # local[x] = local[y]
+        print("local[", s1, "] = local[", s2, "] + ", sep='')
         self.local[s1] = self.local[s2]
 
     def combine(self, s1: int, s2: int) -> None:
-        print("Combining", self.local[s1], "with", self.local[s2], "at index", s1)
+        # local[x] = local[x] + local[y]
+        print("local[", s1, "] = local[", s1, "] + local[", s2, "]", sep='')
         self.local[s1] += self.local[s2]
 
     def display(self) -> None:
-        print("Printing Local Database:")
         for num in self.local:
             print(num, end=' ')
-        print("\nCommands:")
-        for command in self.commands:
-            print(command, end=' ')
         print()
 
     def add_command(self, operator, operand1, operand2):
@@ -279,11 +278,10 @@ if __name__ == '__main__':
         if not curr_transaction.finished():
             granted = do_next_command(DB, Manager, curr_transaction, curr_transaction_index)
             if not no_deadlock(deadlocks, granted, transactions, curr_transaction_index):
-                print("Deadlock!")
+                print("Deadlock")
                 print_locks(transactions, Manager)
                 break
         # if the current transaction is finished, release all locks
         if curr_transaction.finished():
-            print("T", curr_transaction_index, " is finished.", sep='')
             Manager.releaseAll(curr_transaction_index)
     DB.print()
