@@ -32,16 +32,19 @@ class LockManager:
     # return 1 if lock is granted, 0 if not
     def request(self, tid: int, k: int, is_s_lock: bool) -> int:
         granted = False
+        # if we can grant this lock, we need to first release all lock held previously by this tid
         if is_s_lock:
             # if no other transaction has an X-lock
-            if not self.has_x_lock_on(k):
+            if not self.has_x_lock_on(k, tid):
                 granted = True
+                self.releaseAll(tid)
                 self.lock_table[k].append(tid)
                 self.transaction_locks.setdefault(tid, []).append((k, True))
         else:
             # if it's an x-lock, we need to first check if any other transactions has any lock on k
-            if not self.has_lock_on(k):
+            if not self.has_lock_on(k, tid):
                 granted = True
+                self.releaseAll(tid)
                 # see if the current tid holds a lock on k already
                 if tid in self.lock_table[k]:
                     for i, (curr_k, curr_is_s_lock) in enumerate(self.transaction_locks[tid]):
@@ -74,20 +77,28 @@ class LockManager:
 
     # return all locks held by tid
     def showLocks(self, tid: int) -> List[Tuple[int, bool]]:
-        return self.transaction_locks[tid]
+        locks_held = self.transaction_locks[tid] if tid in self.transaction_locks else []
+        print("Locks held by T", tid, " ", locks_held, sep='')
+        return locks_held
 
     # shows if a data item has any lock on it
-    def has_lock_on(self, item: int) -> bool:
-        return len(self.lock_table[item]) > 0
+    def has_lock_on(self, item: int, tid: int) -> bool:
+        for id in self.lock_table[item]:
+            # if there exists any other tids that hold this item and are not the tid, return True
+            if id != tid:
+                return True
+        return False
 
     # shows if a data item has any x-lock on it
-    def has_x_lock_on(self, item: int) -> bool:
+    def has_x_lock_on(self, item: int, tid: int) -> bool:
         transactions = self.lock_table[item]
-        for transaction in transactions:
-            locks = self.transaction_locks[transaction]
-            for data, is_s_lock in locks:
-                if not is_s_lock:
-                    return True
+        for id, transaction in enumerate(transactions):
+            # we're only checking other transactions so we need to ignore the current one
+            if tid != id:
+                locks = self.transaction_locks[transaction]
+                for data, is_s_lock in locks:
+                    if not is_s_lock:
+                        return True
         return False
 
 
@@ -185,7 +196,6 @@ def print_transactions(transactions: List[Transaction]) -> None:
 # performs the next command and removes it from the list
 # returns true if this command is allowed to proceed
 def do_next_command(db: Database, manager: LockManager, transaction: Transaction, tid: int):
-
     operator, operand1, operand2 = transaction.commands[0]
     if operator == 'R':
         granted = manager.request(tid, operand1, True)
@@ -193,13 +203,11 @@ def do_next_command(db: Database, manager: LockManager, transaction: Transaction
         granted = manager.request(tid, operand1, False)
     else:
         granted = True
+        manager.releaseAll(tid)
 
     if granted:
         transaction.commands.pop(0)
 
-    # if we can proceed, release all locks we hold from previous commands:
-    if granted:
-        manager.releaseAll(tid)
     # read
     if operator == 'R':
         if granted:
@@ -238,7 +246,12 @@ def do_next_command(db: Database, manager: LockManager, transaction: Transaction
 
 
 # detect deadlock
-def no_deadlock(deadlocks: List[bool], granted: bool, tid: int) -> bool:
+def no_deadlock(deadlocks: List[bool], granted: bool, transactions: List[Transaction], tid: int) -> bool:
+    # first, refresh to check if there are any transactions finished; if finished, their deadlock needs to be true
+    for i, transaction in enumerate(transactions):
+        if transaction.finished():
+            deadlocks[i] = True
+
     # if the current transaction is granted, set all the deadlocks to False
     if granted:
         deadlocks = [False] * len(deadlocks)
@@ -248,6 +261,11 @@ def no_deadlock(deadlocks: List[bool], granted: bool, tid: int) -> bool:
     # check if everything is true
     # if there's even one False in the array, there is no deadlock
     return False in deadlocks
+
+
+def print_locks(transactions: List[Transaction], manager: LockManager):
+    for tid, transaction in enumerate(transactions):
+        manager.showLocks(tid)
 
 
 if __name__ == '__main__':
@@ -260,11 +278,12 @@ if __name__ == '__main__':
         curr_transaction = transactions[curr_transaction_index]
         if not curr_transaction.finished():
             granted = do_next_command(DB, Manager, curr_transaction, curr_transaction_index)
-            if not no_deadlock(deadlocks, granted, curr_transaction_index):
+            if not no_deadlock(deadlocks, granted, transactions, curr_transaction_index):
                 print("Deadlock!")
+                print_locks(transactions, Manager)
                 break
-        # otherwise, if the current transaction is finished, release all locks
-        else:
-            deadlocks[curr_transaction_index] = True
+        # if the current transaction is finished, release all locks
+        if curr_transaction.finished():
+            print("T", curr_transaction_index, " is finished.", sep='')
             Manager.releaseAll(curr_transaction_index)
     DB.print()
