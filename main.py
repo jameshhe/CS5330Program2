@@ -183,19 +183,30 @@ def print_transactions(transactions: List[Transaction]) -> None:
 
 
 # performs the next command and removes it from the list
+# returns true if this command is allowed to proceed
 def do_next_command(db: Database, manager: LockManager, transaction: Transaction, tid: int):
-    granted = True
-    operator, operand1, operand2 = transaction.commands[0]
 
-    # read
+    operator, operand1, operand2 = transaction.commands[0]
     if operator == 'R':
         granted = manager.request(tid, operand1, True)
+    elif operator == 'W':
+        granted = manager.request(tid, operand1, False)
+    else:
+        granted = True
+
+    if granted:
+        transaction.commands.pop(0)
+
+    # if we can proceed, release all locks we hold from previous commands:
+    if granted:
+        manager.releaseAll(tid)
+    # read
+    if operator == 'R':
         if granted:
             print("T" + str(curr_transaction_index) + " execute ", end='')
             transaction.read(db, operand1, operand2)
     # write
     elif operator == 'W':
-        granted = manager.request(tid, operand1, False)
         if granted:
             print("T" + str(curr_transaction_index) + " execute ", end='')
             transaction.write(db, operand1, operand2)
@@ -223,21 +234,37 @@ def do_next_command(db: Database, manager: LockManager, transaction: Transaction
     elif operator == 'P':
         db.print()
 
+    return granted
+
+
+# detect deadlock
+def no_deadlock(deadlocks: List[bool], granted: bool, tid: int) -> bool:
+    # if the current transaction is granted, set all the deadlocks to False
     if granted:
-        print("Popping")
-        transaction.commands.pop(0)
+        deadlocks = [False] * len(deadlocks)
+    # otherwise, set the deadlocks[tid] to True
+    else:
+        deadlocks[tid] = True
+    # check if everything is true
+    # if there's even one False in the array, there is no deadlock
+    return False in deadlocks
 
 
 if __name__ == '__main__':
     DB, transactions, Manager = setup(int(sys.argv[1]), sys.argv[2:])
+    deadlocks = [False] * len(transactions)
     while processing(transactions):
         # randomly pick a transaction
         curr_transaction_index = random.randrange(0, len(transactions))
         # process the next instruction
         curr_transaction = transactions[curr_transaction_index]
         if not curr_transaction.finished():
-            do_next_command(DB, Manager, curr_transaction, curr_transaction_index)
+            granted = do_next_command(DB, Manager, curr_transaction, curr_transaction_index)
+            if not no_deadlock(deadlocks, granted, curr_transaction_index):
+                print("Deadlock!")
+                break
         # otherwise, if the current transaction is finished, release all locks
         else:
+            deadlocks[curr_transaction_index] = True
             Manager.releaseAll(curr_transaction_index)
     DB.print()
