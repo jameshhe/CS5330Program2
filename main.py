@@ -201,7 +201,7 @@ def do_next_command(db: Database, manager: LockManager, transaction: Transaction
     if operator == 'R':
         granted = manager.request(tid, operand1, True)
     elif operator == 'W':
-        granted = manager.request(tid, operand1, False)
+        granted = manager.request(tid, operand2, False)
     else:
         granted = True
 

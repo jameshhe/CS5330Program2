@@ -6,7 +6,7 @@ from collections import deque
 
 # README!!!
 # To run this program, do
-# python main.py <number of elements in the database> <file 1> <file 2> ...
+# python bonus.py <number of elements in the database> <file 1> <file 2> ...
 
 
 class Database:
@@ -204,15 +204,18 @@ def do_next_command(db: Database, manager: LockManager, transaction: Transaction
     if operator == 'R':
         granted = manager.request(tid, operand1, True)
     elif operator == 'W':
-        granted = manager.request(tid, operand1, False)
+        granted = manager.request(tid, operand2, False)
     else:
         granted = True
 
     if granted:
         transaction.commands.pop(0)
         # remove it from the list and append it to the end of the queue
-        transaction_order.remove(tid)
-        transaction_order.append(tid)
+        if tid not in transaction_order:
+            transaction_order.append(tid)
+        else:
+            transaction_order.remove(tid)
+            transaction_order.append(tid)
 
     # read
     if operator == 'R':
@@ -220,14 +223,14 @@ def do_next_command(db: Database, manager: LockManager, transaction: Transaction
             print("T" + str(curr_transaction_index) + " execute ", end='')
             transaction.read(db, operand1, operand2)
         else:
-            wait_die(transaction_order, tid, operand1, manager)
+            wait_die(transaction_order, transaction, tid, operand1, manager)
     # write
     elif operator == 'W':
         if granted:
             print("T" + str(curr_transaction_index) + " execute ", end='')
             transaction.write(db, operand1, operand2)
         else:
-            wait_die(transaction_order, tid, operand2, manager)
+            wait_die(transaction_order, transaction, tid, operand2, manager)
     # add
     elif operator == 'A':
         print("T" + str(curr_transaction_index) + " execute ", end='')
@@ -255,35 +258,32 @@ def do_next_command(db: Database, manager: LockManager, transaction: Transaction
     return granted
 
 
-# detect deadlock
-def no_deadlock(deadlocks: List[bool], granted: bool, transactions: List[Transaction], tid: int) -> bool:
-    # first, refresh to check if there are any transactions finished; if finished, their deadlock needs to be true
-    for i, transaction in enumerate(transactions):
-        if transaction.finished():
-            deadlocks[i] = True
-
-    # if the current transaction is granted, set all the deadlocks to False
-    if granted:
-        deadlocks = [False] * len(deadlocks)
-    # otherwise, set the deadlocks[tid] to True
-    else:
-        deadlocks[tid] = True
-    # check if everything is true
-    # if there's even one False in the array, there is no deadlock
-    return False in deadlocks
-
-
 def print_locks(transactions: List[Transaction], manager: LockManager):
     for tid, transaction in enumerate(transactions):
         print(manager.showLocks(tid))
 
 
-def wait_die(transaction_order: Deque[int], tid: int, item: int, manager: LockManager):
+def wait_die(transaction_order: Deque[int], transaction: Transaction, tid: int, item: int, manager: LockManager):
+    # print(manager.lock_table, item)
     # find what transaction is holding the lock we want
-    locks = manager.has_lock_on(item, tid)
-    print("Locks held: ", locks)
+    transactions_holding = manager.lock_table[item]
+    # sort the transactions based on the timestamp
+    transactions_holding = sorted(transactions_holding, key=lambda x: transaction_order.index(x))
+    # print("Transactions holding this item:", transactions_holding)
+    # get the first one that is not the current transaction
+    for id in transactions_holding:
+        if id != tid:
+            Tj = id
+            break
 
     # if we're waiting, then skip to the next transaction pass
+    if not wait(transaction_order, tid, Tj):
+        # if we need to abort, delete all the commands
+        print("Abort T", tid, sep='')
+        # print("Transaction timestamp", transaction_order)
+        # print("T", Tj, " has Locks: ", manager.showLocks(Tj), sep='')
+        transaction.commands = []
+        manager.releaseAll(tid)
 
 
 def wait(transaction_order: Deque[int], Ti: int, Tj: int) -> bool:
@@ -297,7 +297,6 @@ if __name__ == '__main__':
     if len(sys.argv) < 2:
         raise "No command line argument!"
     DB, transactions, Manager = setup(int(sys.argv[1]), sys.argv[2:])
-    deadlocks = [False] * len(transactions)
     transaction_order = deque([])
     while processing(transactions):
         # randomly pick a transaction
@@ -305,11 +304,7 @@ if __name__ == '__main__':
         # process the next instruction
         curr_transaction = transactions[curr_transaction_index]
         if not curr_transaction.finished():
-            granted = do_next_command(DB, Manager, curr_transaction, curr_transaction_index, transaction_order)
-            if not no_deadlock(deadlocks, granted, transactions, curr_transaction_index):
-                print("Deadlock")
-                # print_locks(transactions, Manager)
-                break
+            do_next_command(DB, Manager, curr_transaction, curr_transaction_index, transaction_order)
         # if the current transaction is finished, release all locks
         if curr_transaction.finished():
             Manager.releaseAll(curr_transaction_index)
