@@ -41,14 +41,12 @@ class LockManager:
             # if no other transaction has an X-lock
             if not self.has_x_lock_on(k, tid):
                 granted = True
-                self.releaseAll(tid)
                 self.lock_table[k].append(tid)
                 self.transaction_locks.setdefault(tid, []).append((k, True))
         else:
             # if it's an x-lock, we need to first check if any other transactions has any lock on k
             if not self.has_lock_on(k, tid):
                 granted = True
-                self.releaseAll(tid)
                 # see if the current tid holds a lock on k already
                 if tid in self.lock_table[k]:
                     for i, (curr_k, curr_is_s_lock) in enumerate(self.transaction_locks[tid]):
@@ -206,7 +204,6 @@ def do_next_command(db: Database, manager: LockManager, transaction: Transaction
         granted = manager.request(tid, operand1, False)
     else:
         granted = True
-        manager.releaseAll(tid)
 
     if granted:
         transaction.commands.pop(0)
@@ -268,7 +265,7 @@ def no_deadlock(deadlocks: List[bool], granted: bool, transactions: List[Transac
 
 def print_locks(transactions: List[Transaction], manager: LockManager):
     for tid, transaction in enumerate(transactions):
-        manager.showLocks(tid)
+        print(manager.showLocks(tid))
 
 
 if __name__ == '__main__':
@@ -285,7 +282,7 @@ if __name__ == '__main__':
             granted = do_next_command(DB, Manager, curr_transaction, curr_transaction_index)
             if not no_deadlock(deadlocks, granted, transactions, curr_transaction_index):
                 print("Deadlock")
-                print_locks(transactions, Manager)
+                # print_locks(transactions, Manager)
                 break
         # if the current transaction is finished, release all locks
         if curr_transaction.finished():
