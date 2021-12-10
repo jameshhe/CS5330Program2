@@ -1,1 +1,3 @@
 # CS5330Program2
+In order to run this project, please run it in command line with the following template:</br>
+python main.py number of elements in database file1 file2 ...

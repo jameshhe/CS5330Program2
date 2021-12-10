@@ -4,7 +4,7 @@ import random
 
 # README!!!
 # To run this program, do
-# python main.py <number of elements in the database> <file 1> <file 2> ...
+# python bonus.py <number of elements in the database> <file 1> <file 2> ...
 
 
 class Database:
